@@ -1,5 +1,7 @@
 import numpy as np
 from numba import jit
+from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression
 
 class PerfMetrics:
 
@@ -8,14 +10,18 @@ class PerfMetrics:
         self, 
         data,
         benchmark_rate,
+        benchmark_log_return,
         return_field='return',
         drawdown_method='log',
+        calmer_years=3,
     ):
         self.data=data
         self.benchmark_rate=benchmark_rate
+        self.benchmark_log_return=benchmark_log_return
         self.dates=self.data['date'].values.astype(np.datetime64)
         self.prices=self.data['price'].values.astype(np.float32)
         self._return=self.data[return_field].dropna().values.astype(np.float32)
+        self._log_return=self.data[f'log {return_field}'].dropna().values.astype(np.float32)
         self.years_past=self._get_year_past()
         self.entries_per_year=len(self.data)/self.years_past
         self.information_payload={}
@@ -26,6 +32,7 @@ class PerfMetrics:
             'percent': lambda price, peak: 1 - price / peak,
             'log': lambda price, peak: np.log(peak / price)
         }
+        self.calmer_years=calmer_years
 
 
     def _get_year_past(self):
@@ -121,14 +128,55 @@ class PerfMetrics:
         }
 
 
-    def get_max_drawdown(self,method='log'):
+    def get_max_drawdown(self,method='log', get_return=False):
         assert method in self.drawdown_evaluator, f'Method: "{method}" must by one of {list(self.drawdown_evaluator.keys())}'
-        self.information_payload['max_drawdown']=self._get_max_drawdown(
+        output=self._get_max_drawdown(
             self.dates,
             self.prices,
             method,
             self.drawdown_evaluator,
         )
+        if not get_return:
+            self.information_payload['max_drawdown']=output
+        else:
+            return output
+
+
+    def get_log_max_drawdown_ratio(self):
+        log_max_drawdown=self.get_max_drawdown(method='log', get_return=True)
+        self.information_payload['log_max_drawdown_ratio']=(np.log(self.prices[-1]) - np.log(self.prices[0])) - log_max_drawdown['max_drawdown']
+
+
+    def get_calmer_ratio(self):
+        first_day=self.data.iloc[-1]['date'] - timedelta(days=365.25*self.calmer_years)
+        _filtered_series=self.data[self.data.date > first_day]
+        _prices=_filtered_series.price.values.astype(np.float32)
+        _dates=_filtered_series.date.values.astype(np.datetime64)
+        _cagr=self._get_cagr(_prices, self.calmer_years)
+        _max_drawdown=self._get_max_drawdown(
+            _dates,
+            _prices,
+            'percent',
+            self.drawdown_evaluator,
+        )["max_drawdown"]
+        self.information_payload['calmer_ratio']=_cagr / _max_drawdown
+
+
+    def get_pure_profit_score(self):
+        if 'cagr' not in self.information_payload: self.get_cagr()
+
+        lr=LinearRegression()
+        x, y=np.arange(len(self.prices)).reshape([-1,1]), self.prices.reshape([-1,1])
+        fitted=lr.fit(x,y)
+        r2=fitted.score(x,y)
+        self.information_payload['pps']=self.information_payload['cagr'] * r2
+
+
+    def get_jensens_alpha(self):
+        lr=LinearRegression()
+        x, y = self.benchmark_log_return.reshape([-1,1]), self._log_return.reshape([-1,1])
+        fitted=lr.fit(x,y)
+        self.information_payload['jensens_alpha']=fitted.intercept_[0]
 
 
     def get_payload(
@@ -139,4 +187,8 @@ class PerfMetrics:
         if 'sharpe' not in self.information_payload: self.get_sharpe()
         if 'sortino_ratio' not in self.information_payload: self.get_sortino_ratio()
         if 'max_drawdown' not in self.information_payload: self.get_max_drawdown(method=self.drawdown_method)
+        if 'log_max_drawdown_ratio' not in self.information_payload: self.get_log_max_drawdown_ratio()
+        if 'calmer_ratio' not in self.information_payload: self.get_calmer_ratio()
+        if 'pps' not in self.information_payload: self.get_pure_profit_score()
+        if 'jensens_alpha' not in self.information_payload: self.get_jensens_alpha()
         return self.information_payload

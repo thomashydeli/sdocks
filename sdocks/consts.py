@@ -16,6 +16,7 @@ class InvestmentData:
     ):
         self.dates=dates
         self.prices=np.array(prices, dtype=np.float32)
+        self._n=len(self.prices) # how many datapoints
         self.ticker=ticker
 
         self._create_data_frame() # creating a dataframe for preserving information

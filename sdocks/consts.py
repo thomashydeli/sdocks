@@ -13,6 +13,9 @@ class InvestmentData:
         dates: List[str],
         prices: List[float],
         ticker: Optional[str]=None,
+        highs:Optional[List[float]]=None,
+        lows:Optional[List[float]]=None,
+        volumes:Optional[List[float]]=None,
     ):
         self.dates=dates
         self.prices=np.array(prices, dtype=np.float32)
@@ -20,6 +23,13 @@ class InvestmentData:
         self.ticker=ticker
 
         self._create_data_frame() # creating a dataframe for preserving information
+
+        if highs is not None: self.highs=np.array(highs, dtype=np.float32) 
+        else: self.highs=None
+        if lows is not None: self.lows=np.array(lows, dtype=np.float32) 
+        else: self.lows=None
+        if volumes is not None: self.volumes=np.array(volumes, dtype=np.float32) 
+        else: self.volumes=None
 
 
     @staticmethod
